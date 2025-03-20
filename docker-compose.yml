@@ -1,0 +1,28 @@
+version: '3'
+services:
+  server:
+    build: .
+    container_name: servidor
+    ports:
+      - "5000:5000"
+    command: ["/app/server"]
+
+  client:
+    build: .
+    depends_on:
+      - server
+    stdin_open: true
+    tty: true
+    command: ["/app/client"]
+
+  charger:
+    build: .
+    container_name: ponto_de_recarga_1
+    ports:
+      - "6001:6001"
+    environment:
+      - ID=ponto_1
+      - LAT=-23.5505
+      - LON=-46.6333
+      - PORT=6001
+    command: ["/app/charger"]
