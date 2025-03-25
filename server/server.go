@@ -54,8 +54,6 @@ func handleClient(conn net.Conn) {
 		fmt.Println("Erro ao ler mensagem do cliente:", err)
 		return
 	}
-	// message = strings.TrimSpace(message)
-	// fmt.Println("Mensagem recebida do cliente:", message)
 
 	var request Message
 	err = json.Unmarshal([]byte(message), &request)
@@ -74,41 +72,18 @@ func handleClient(conn net.Conn) {
 		fmt.Printf("Longitude: %v\n", carro["longitude"])
 	}
 
-	// if message == "LISTAR_PONTOS" {
-	// 	fmt.Println("Cliente solicitou a lista de pontos de recarga.")
-	// 	// ----------------> roda até aqui mas não lê o buffer <--------------------
+	// TODO
+	// para o ponto
+	// solicitar disponibilidade dos pontos
+	// acrescentar carro na fila
+	// atualizar fila (após carregamento)
 
-	// 	// Solicita a lista aos Pontos de Recarga
-	// 	// var responseBuilder strings.Builder
-	// 	// for _, endereco := range pontosDeRecarga {
-	// 	// 	_ = obterPontoDeRecarga(endereco)
-	// 	// 	// responseBuilder.WriteString(respostaPonto)
-	// 	// }
+	//para o carro
+	// lista de pontos ordenada
+	// confirmar reserva
+	// informar valor
+	// atualizar histórico após pagamento
 
-	// 	// // Envia a resposta completa ao Cliente
-	// 	// responseFinal := responseBuilder.String()
-	// 	// fmt.Fprintln(conn, responseFinal) // Garante que toda a resposta seja enviada
-	// 	// fmt.Println("Lista de pontos enviada ao Cliente:", responseFinal)
-
-	// 	buffer := make([]byte, 1024)
-	// 	for {
-	// 		n, err := conn.Read(buffer)
-	// 		if err != nil {
-	// 			fmt.Println("Erro ao receber dados:", err)
-	// 			return
-	// 		}
-
-	// 		var carro map[string]interface{}
-	// 		err = json.Unmarshal(buffer[:n], &carro)
-	// 		if err != nil {
-	// 			fmt.Println("Erro ao decodificar JSON:", err)
-	// 			return
-	// 		}
-	// 		fmt.Println("Dados do carro recebidos:")
-	// 		fmt.Printf("Latitude: %v\n", carro["latitude"])
-	// 		fmt.Printf("Longitude: %v\n", carro["longitude"])
-	// 	}
-	// }
 }
 
 func obterPontoDeRecarga(endereco string) PontoRecarga {

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 )
@@ -22,8 +23,14 @@ const (
 	listarPontosAction = "LISTAR_PONTOS"
 )
 
+var carro = Carro{
+	Latitude:  rand.Float64()*180 - 90,
+	Longitude: rand.Float64()*360 - 180,
+}
+
 func main() {
 	serverAddr := "server:5000"
+	listener, err := net.Listen("tcp", ":6002")
 
 	// Conecta ao Servidor
 	conn, err := net.Dial("tcp", serverAddr)
@@ -35,10 +42,7 @@ func main() {
 
 	// Envia a requisição para listar os pontos de recarga
 	// fmt.Fprintln(conn, "LISTAR_PONTOS")
-	carro := Carro{
-		Latitude:  -23.5505,
-		Longitude: -46.6333,
-	}
+
 	listarPontosMessage := listarPontos(carro)
 	listarPontosJSON, _ := json.Marshal(listarPontosMessage)
 
@@ -61,7 +65,21 @@ func main() {
 		}
 		fmt.Println(strings.TrimSpace(response))
 	}
+
+	for {
+		_, err := listener.Accept()
+		if err != nil {
+			fmt.Println("Erro ao aceitar conexão:", err)
+			continue
+		}
+	}
 }
+
+// TODO
+// request da reserva
+// informa inicio do carregamento
+// informa termino do carregamento
+// pagamento
 
 func listarPontos(carro Carro) Message {
 	return Message{

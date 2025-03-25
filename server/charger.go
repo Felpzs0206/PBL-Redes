@@ -52,4 +52,7 @@ func handleServerRequest(conn net.Conn) {
 		fmt.Fprintln(conn, response)
 		fmt.Println("Dados enviados ao Servidor:", response)
 	}
+
+	// TODO
+	// retorna posição e fila de espera
 }

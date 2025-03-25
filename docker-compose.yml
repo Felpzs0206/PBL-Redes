@@ -33,3 +33,14 @@ services:
     stdin_open: true
     tty: true
     command: ["/app/client"]
+  
+  client1:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: cliente1
+    depends_on:
+      - server
+    stdin_open: true
+    tty: true
+    command: ["/app/client"]

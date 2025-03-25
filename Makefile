@@ -18,4 +18,4 @@ clean:
 
 # Roda o client
 client:
-	docker-compose up --build client
+	docker-compose up --build client client1
