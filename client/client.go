@@ -42,6 +42,15 @@ func main() {
 	listarPontosMessage := listarPontos(carro)
 	listarPontosJSON, _ := json.Marshal(listarPontosMessage)
 
+	// Garante que a mensagem JSON seja enviada corretamente com um \n
+	listarPontosJSON = append(listarPontosJSON, '\n')
+	fmt.Printf("%#v", listarPontosJSON)
+
+	_, err = conn.Write(listarPontosJSON)
+	if err != nil {
+		fmt.Println("Erro ao enviar mensagem ao servidor:", err)
+		return
+	}
 	// Lê todas as linhas da resposta do Servidor
 	fmt.Println("Posições dos Pontos de Recarga recebidas:")
 	reader := bufio.NewReader(conn)

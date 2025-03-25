@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net"
@@ -17,6 +18,11 @@ type PontoRecarga struct {
 	Latitude  float64
 	Longitude float64
 	Distancia float64
+}
+
+type Message struct {
+	Action  string                 `json:"action"`
+	Content map[string]interface{} `json:"content"`
 }
 
 func main() {
@@ -48,24 +54,61 @@ func handleClient(conn net.Conn) {
 		fmt.Println("Erro ao ler mensagem do cliente:", err)
 		return
 	}
-	message = strings.TrimSpace(message)
-	fmt.Println("Mensagem recebida do cliente:", message)
+	// message = strings.TrimSpace(message)
+	// fmt.Println("Mensagem recebida do cliente:", message)
 
-	if message == "LISTAR_PONTOS" {
+	var request Message
+	err = json.Unmarshal([]byte(message), &request)
+	if err != nil {
+		fmt.Println("Erro ao decodificar JSON. A mensagem recebida foi:", message)
+		return
+	}
+
+	if request.Action == "LISTAR_PONTOS" {
 		fmt.Println("Cliente solicitou a lista de pontos de recarga.")
 
-		// Solicita a lista aos Pontos de Recarga
-		var responseBuilder strings.Builder
-		for _, endereco := range pontosDeRecarga {
-			_ = obterPontoDeRecarga(endereco)
-			// responseBuilder.WriteString(respostaPonto)
-		}
-
-		// Envia a resposta completa ao Cliente
-		responseFinal := responseBuilder.String()
-		fmt.Fprintln(conn, responseFinal) // Garante que toda a resposta seja enviada
-		fmt.Println("Lista de pontos enviada ao Cliente:", responseFinal)
+		// Extrai a posição do carro
+		carro := request.Content
+		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("Latitude: %v\n", carro["latitude"])
+		fmt.Printf("Longitude: %v\n", carro["longitude"])
 	}
+
+	// if message == "LISTAR_PONTOS" {
+	// 	fmt.Println("Cliente solicitou a lista de pontos de recarga.")
+	// 	// ----------------> roda até aqui mas não lê o buffer <--------------------
+
+	// 	// Solicita a lista aos Pontos de Recarga
+	// 	// var responseBuilder strings.Builder
+	// 	// for _, endereco := range pontosDeRecarga {
+	// 	// 	_ = obterPontoDeRecarga(endereco)
+	// 	// 	// responseBuilder.WriteString(respostaPonto)
+	// 	// }
+
+	// 	// // Envia a resposta completa ao Cliente
+	// 	// responseFinal := responseBuilder.String()
+	// 	// fmt.Fprintln(conn, responseFinal) // Garante que toda a resposta seja enviada
+	// 	// fmt.Println("Lista de pontos enviada ao Cliente:", responseFinal)
+
+	// 	buffer := make([]byte, 1024)
+	// 	for {
+	// 		n, err := conn.Read(buffer)
+	// 		if err != nil {
+	// 			fmt.Println("Erro ao receber dados:", err)
+	// 			return
+	// 		}
+
+	// 		var carro map[string]interface{}
+	// 		err = json.Unmarshal(buffer[:n], &carro)
+	// 		if err != nil {
+	// 			fmt.Println("Erro ao decodificar JSON:", err)
+	// 			return
+	// 		}
+	// 		fmt.Println("Dados do carro recebidos:")
+	// 		fmt.Printf("Latitude: %v\n", carro["latitude"])
+	// 		fmt.Printf("Longitude: %v\n", carro["longitude"])
+	// 	}
+	// }
 }
 
 func obterPontoDeRecarga(endereco string) PontoRecarga {
