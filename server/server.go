@@ -62,16 +62,39 @@ func handleClient(conn net.Conn) {
 		return
 	}
 
-	if request.Action == "LISTAR_PONTOS" {
+	switch request.Action {
+	case "LISTAR_PONTOS":
 		fmt.Println("Cliente solicitou a lista de pontos de recarga.")
 
 		// Extrai a posição do carro
 		carro := request.Content
 		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
 		fmt.Printf("Latitude: %v\n", carro["latitude"])
 		fmt.Printf("Longitude: %v\n", carro["longitude"])
-	}
 
+	case "RESERVAR_PONTO":
+		fmt.Println("Cliente solicitou reserva de ponto de recarga.")
+
+		carro := request.Content
+		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
+
+	case "INICIO_CARREGAMENTO":
+		fmt.Println("Cliente solicitou início de carregamento.")
+		carro := request.Content
+		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
+
+	case "FIM_CARREGAMENTO":
+		fmt.Println("Cliente solicitou fim de carregamento.")
+		carro := request.Content
+		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
+	default:
+		fmt.Println("Ação desconhecida:", request.Action)
+		return
+	}
 	// TODO
 	// para o ponto
 	// solicitar disponibilidade dos pontos

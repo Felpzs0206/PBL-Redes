@@ -8,6 +8,8 @@ services:
     ports:
       - "5000:5000"
     command: ["/app/server"]
+    networks:
+      - rede_carregamento
 
   charger:
     build:
@@ -22,6 +24,8 @@ services:
       - LON=-46.6333
       - PORT=6001
     command: ["/app/charger"]
+    networks:
+      - rede_carregamento
 
   client:
     build:
@@ -33,7 +37,9 @@ services:
     stdin_open: true
     tty: true
     command: ["/app/client"]
-  
+    networks:
+      - rede_carregamento
+
   client1:
     build:
       context: ./client
@@ -44,3 +50,9 @@ services:
     stdin_open: true
     tty: true
     command: ["/app/client"]
+    networks:
+      - rede_carregamento
+
+networks:
+  rede_carregamento:
+    driver: bridge
