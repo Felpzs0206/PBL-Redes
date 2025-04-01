@@ -3,22 +3,19 @@ WORKDIR /app
 
 # Copia os arquivos do projeto
 COPY go.mod .
-RUN go mod tidy  # Garante que todas as dependências sejam instaladas
-
+RUN go mod tidy   
+# Garante que todas as dependências sejam instaladas
 COPY . .
 
-# Compila os binários do servidor e do charger
+# Compila apenas o binário do servidor
 RUN go build -o server server.go
-RUN go build -o charger charger.go
 
 # Imagem final
 FROM golang:1.20
 WORKDIR /app
 COPY --from=builder /app/server .
-COPY --from=builder /app/charger .
 
-# Garante que os binários tenham permissão de execução
-RUN chmod +x /app/server /app/charger
+# Garante que o binário tenha permissão de execução
+RUN chmod +x /app/server
 
-CMD ["/app/charger"]
-
+CMD ["/app/server"]

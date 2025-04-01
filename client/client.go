@@ -19,10 +19,27 @@ type Message struct {
 }
 
 type Carro struct {
-	ID        string  `json:"id"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Bateria   int     `json:"bateria"`
+	ID        string      `json:"id"`
+	Latitude  float64     `json:"latitude"`
+	Longitude float64     `json:"longitude"`
+	Bateria   int         `json:"bateria"`
+	Historico []Historico `json:"historico"`
+}
+
+type Historico struct {
+	ID                   string               `json:"id"`
+	SessaoDeCarregamento SessaoDeCarregamento `json:"sessao_de_carregamento"`
+	Pagamento            Pagamento            `json:"pagamento"`
+}
+
+type SessaoDeCarregamento struct {
+	Inicio time.Time `json:"inicio"`
+	Fim    time.Time `json:"fim"`
+}
+
+type Pagamento struct {
+	Valor float64 `json:"valor"`
+	Pago  bool    `json:"status"`
 }
 
 const (
@@ -49,8 +66,9 @@ var (
 func main() {
 	go monitorarBateria(commandChan) // Bateria agora usa o mesmo canal
 	go entradaUsuario(commandChan)   // Entrada do usuário
-
+	mostrarMenu()
 	for cmd := range commandChan {
+
 		switch cmd {
 		case "1":
 			fmt.Println("\nListando pontos de recarga...")
@@ -117,7 +135,7 @@ func entradaUsuario(commandChan chan<- string) {
 	}
 }
 
-// 🚀 Envia mensagens para o servidor
+// Envia mensagens para o servidor
 func enviarMensagem(msg Message) {
 	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
@@ -188,4 +206,8 @@ func fimCarregamento(carro Carro) Message {
 			"ID": carro.ID,
 		},
 	}
+}
+
+func calcularTempoDecorrido(inicio, fim time.Time) float64 {
+	return fim.Sub(inicio).Seconds()
 }
