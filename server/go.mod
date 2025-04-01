@@ -1,3 +1,3 @@
-module go-docker/server
+module go-docker
 
 go 1.20

@@ -12,10 +12,19 @@ up:
 down:
 	docker-compose down --volumes --remove-orphans
 
+down-client:
+	docker-compose stop client
+	docker-compose rm -f client
+
 # Remover imagens e volumes antigos
 clean:
 	docker system prune -a -f
 
 # Roda o client
-client:
-	docker-compose up --build client client1
+build-client:
+	docker-compose build client
+
+run-client:
+	docker-compose run client
+
+

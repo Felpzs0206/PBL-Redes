@@ -10,6 +10,11 @@ import (
 	"strings"
 )
 
+type Message struct {
+	Action  string                 `json:"action"`
+	Content map[string]interface{} `json:"content"`
+}
+
 // Lista de Pontos de Recarga e suas portas
 var pontosDeRecarga = []string{"charger:6001"}
 
@@ -18,11 +23,6 @@ type PontoRecarga struct {
 	Latitude  float64
 	Longitude float64
 	Distancia float64
-}
-
-type Message struct {
-	Action  string                 `json:"action"`
-	Content map[string]interface{} `json:"content"`
 }
 
 func main() {
@@ -62,16 +62,45 @@ func handleClient(conn net.Conn) {
 		return
 	}
 
-	if request.Action == "LISTAR_PONTOS" {
+	switch request.Action {
+	case "LISTAR_PONTOS":
 		fmt.Println("Cliente solicitou a lista de pontos de recarga.")
 
 		// Extrai a posição do carro
 		carro := request.Content
 		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
 		fmt.Printf("Latitude: %v\n", carro["latitude"])
 		fmt.Printf("Longitude: %v\n", carro["longitude"])
-	}
 
+		pontosRecarga := obterPontoDeRecarga("charger:6001")
+		fmt.Printf("Ponto de recarga encontrado: %s\n", pontosRecarga.ID)
+		fmt.Printf("Latitude: %f\n", pontosRecarga.Latitude)
+		fmt.Printf("Longitude: %f\n", pontosRecarga.Longitude)
+		fmt.Printf("Distância: %f km\n", calcularDistancia(carro["latitude"].(float64), carro["longitude"].(float64), pontosRecarga.Latitude, pontosRecarga.Longitude))
+
+	case "RESERVAR_PONTO":
+		fmt.Println("Cliente solicitou reserva de ponto de recarga.")
+
+		carro := request.Content
+		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
+
+	case "INICIO_CARREGAMENTO":
+		fmt.Println("Cliente solicitou início de carregamento.")
+		carro := request.Content
+		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
+
+	case "FIM_CARREGAMENTO":
+		fmt.Println("Cliente solicitou fim de carregamento.")
+		carro := request.Content
+		fmt.Println("Dados do carro recebidos:")
+		fmt.Printf("ID: %v\n", carro["ID"])
+	default:
+		fmt.Println("Ação desconhecida:", request.Action)
+		return
+	}
 	// TODO
 	// para o ponto
 	// solicitar disponibilidade dos pontos
@@ -82,7 +111,7 @@ func handleClient(conn net.Conn) {
 	// lista de pontos ordenada
 	// confirmar reserva
 	// informar valor
-	// atualizar histórico após pagamento
+	// confirmar pagamento
 
 }
 
@@ -138,4 +167,8 @@ func calcularDistancia(lat1, lon1, lat2, lon2 float64) float64 {
 
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return R * c // Retorna a distância em km
+}
+
+func calcularValorConta(tempoDecorrido float64) float64 {
+	return tempoDecorrido * 0.5
 }

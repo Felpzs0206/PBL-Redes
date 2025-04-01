@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 type Message struct {
@@ -15,24 +19,124 @@ type Message struct {
 }
 
 type Carro struct {
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
+	ID        string      `json:"id"`
+	Latitude  float64     `json:"latitude"`
+	Longitude float64     `json:"longitude"`
+	Bateria   int         `json:"bateria"`
+	Historico []Historico `json:"historico"`
+}
+
+type Historico struct {
+	ID                   string               `json:"id"`
+	SessaoDeCarregamento SessaoDeCarregamento `json:"sessao_de_carregamento"`
+	Pagamento            Pagamento            `json:"pagamento"`
+}
+
+type SessaoDeCarregamento struct {
+	Inicio time.Time `json:"inicio"`
+	Fim    time.Time `json:"fim"`
+}
+
+type Pagamento struct {
+	Valor float64 `json:"valor"`
+	Pago  bool    `json:"status"`
 }
 
 const (
-	listarPontosAction = "LISTAR_PONTOS"
+	listarPontosAction       = "LISTAR_PONTOS"
+	fazerReservaAction       = "RESERVAR_PONTO"
+	inicioCarregamentoAction = "INICIO_CARREGAMENTO"
+	fimCarregamentoAction    = "FIM_CARREGAMENTO"
 )
 
-var carro = Carro{
-	Latitude:  rand.Float64()*180 - 90,
-	Longitude: rand.Float64()*360 - 180,
-}
+var (
+	serverAddr    = "server:5000"
+	mutex         sync.Mutex // Proteção contra condições de corrida
+	commandChan   = make(chan string)
+	alertaEnviado bool
+
+	carro = Carro{
+		ID:        "carro-" + os.Getenv("HOSTNAME") + "-" + strconv.Itoa(rand.Intn(1000)),
+		Latitude:  rand.Float64()*180 - 90,
+		Longitude: rand.Float64()*360 - 180,
+		Bateria:   100,
+	}
+)
 
 func main() {
-	serverAddr := "server:5000"
-	listener, err := net.Listen("tcp", ":6002")
+	go monitorarBateria(commandChan) // Bateria agora usa o mesmo canal
+	go entradaUsuario(commandChan)   // Entrada do usuário
+	mostrarMenu()
+	for cmd := range commandChan {
 
-	// Conecta ao Servidor
+		switch cmd {
+		case "1":
+			fmt.Println("\nListando pontos de recarga...")
+			enviarMensagem(listarPontos(carro))
+		case "2":
+			fmt.Println("\nReservando ponto de recarga...")
+			enviarMensagem(reservarPonto(carro))
+		case "3":
+			fmt.Println("\nInformando início do carregamento...")
+			enviarMensagem(inicioCarregamento(carro))
+		case "4":
+			fmt.Println("\nInformando fim do carregamento...")
+			enviarMensagem(fimCarregamento(carro))
+		case "BATERIA_CRITICA":
+			fmt.Println("\nBateria em nível crítico! Conecte-se a um ponto de recarga.")
+			enviarMensagem(listarPontos(carro))
+		default:
+			fmt.Println("\nOpção inválida. Escolha uma opção válida.")
+		}
+		mostrarMenu()
+	}
+}
+
+// Mostra o menu de opções para o usuário
+func mostrarMenu() {
+	fmt.Println("\n==== MENU PRINCIPAL ====")
+	fmt.Println("1. Listar pontos de recarga")
+	fmt.Println("2. Reservar ponto de recarga")
+	fmt.Println("3. Informar início do carregamento")
+	fmt.Println("4. Informar fim do carregamento")
+	fmt.Print("Escolha uma opção: ")
+}
+
+// Monitora a bateria e reduz ao longo do tempo
+func monitorarBateria(commandChan chan<- string) {
+	for {
+		time.Sleep(5 * time.Second) // consumo de bateria
+		mutex.Lock()
+		carro.Bateria -= 10
+		if carro.Bateria < 0 {
+			carro.Bateria = 0
+		}
+		fmt.Printf("\nBateria - Nível atual: %d%%\n", carro.Bateria)
+
+		// envia alerta apenas uma vez quando a bateria chega a 20%
+		if carro.Bateria <= 20 && !alertaEnviado {
+			commandChan <- "BATERIA_CRITICA"
+			alertaEnviado = true
+		}
+		mutex.Unlock()
+	}
+}
+
+// Captura entrada do usuário
+func entradaUsuario(commandChan chan<- string) {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Erro ao ler entrada:", err)
+			continue
+		}
+		commandChan <- strings.TrimSpace(input)
+	}
+}
+
+// Envia mensagens para o servidor
+func enviarMensagem(msg Message) {
 	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
 		fmt.Println("Erro ao conectar ao servidor:", err)
@@ -40,53 +144,70 @@ func main() {
 	}
 	defer conn.Close()
 
-	// Envia a requisição para listar os pontos de recarga
-	// fmt.Fprintln(conn, "LISTAR_PONTOS")
+	jsonMsg, _ := json.Marshal(msg)
+	jsonMsg = append(jsonMsg, '\n')
 
-	listarPontosMessage := listarPontos(carro)
-	listarPontosJSON, _ := json.Marshal(listarPontosMessage)
-
-	// Garante que a mensagem JSON seja enviada corretamente com um \n
-	listarPontosJSON = append(listarPontosJSON, '\n')
-	fmt.Printf("%#v", listarPontosJSON)
-
-	_, err = conn.Write(listarPontosJSON)
+	_, err = conn.Write(jsonMsg)
 	if err != nil {
 		fmt.Println("Erro ao enviar mensagem ao servidor:", err)
 		return
 	}
-	// Lê todas as linhas da resposta do Servidor
-	fmt.Println("Posições dos Pontos de Recarga recebidas:")
+
+	fmt.Println("Mensagem enviada ao servidor:", string(jsonMsg))
+
+	// Lê a resposta do servidor
 	reader := bufio.NewReader(conn)
 	for {
 		response, err := reader.ReadString('\n')
 		if err != nil {
-			break // Sai do loop quando não houver mais dados
+			break
 		}
-		fmt.Println(strings.TrimSpace(response))
-	}
-
-	for {
-		_, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Erro ao aceitar conexão:", err)
-			continue
-		}
+		fmt.Println("Resposta do servidor:", strings.TrimSpace(response))
 	}
 }
 
-// TODO
-// request da reserva
-// informa inicio do carregamento
-// informa termino do carregamento
-// pagamento
-
+// Cria uma mensagem JSON para listar pontos de recarga
 func listarPontos(carro Carro) Message {
 	return Message{
 		Action: listarPontosAction,
 		Content: map[string]interface{}{
+			"ID":        carro.ID,
 			"longitude": carro.Longitude,
 			"latitude":  carro.Latitude,
 		},
 	}
+}
+
+// Cria uma mensagem JSON para reservar um ponto
+func reservarPonto(carro Carro) Message {
+	return Message{
+		Action: fazerReservaAction,
+		Content: map[string]interface{}{
+			"ID": carro.ID,
+		},
+	}
+}
+
+// Informa o início do carregamento
+func inicioCarregamento(carro Carro) Message {
+	return Message{
+		Action: inicioCarregamentoAction,
+		Content: map[string]interface{}{
+			"ID": carro.ID,
+		},
+	}
+}
+
+// Informa o fim do carregamento
+func fimCarregamento(carro Carro) Message {
+	return Message{
+		Action: fimCarregamentoAction,
+		Content: map[string]interface{}{
+			"ID": carro.ID,
+		},
+	}
+}
+
+func calcularTempoDecorrido(inicio, fim time.Time) float64 {
+	return fim.Sub(inicio).Seconds()
 }

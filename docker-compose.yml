@@ -1,4 +1,5 @@
 version: '3'
+
 services:
   server:
     build:
@@ -8,10 +9,12 @@ services:
     ports:
       - "5000:5000"
     command: ["/app/server"]
+    networks:
+      - rede_carregamento
 
   charger:
     build:
-      context: ./server
+      context: ./charger  # Agora corretamente aponta para o diretório charger
       dockerfile: Dockerfile
     container_name: ponto_de_recarga_1
     ports:
@@ -21,7 +24,11 @@ services:
       - LAT=-23.5505
       - LON=-46.6333
       - PORT=6001
+    depends_on:
+      - server  # Espera o servidor iniciar antes de rodar o charger
     command: ["/app/charger"]
+    networks:
+      - rede_carregamento
 
   client:
     build:
@@ -33,7 +40,9 @@ services:
     stdin_open: true
     tty: true
     command: ["/app/client"]
-  
+    networks:
+      - rede_carregamento
+
   client1:
     build:
       context: ./client
@@ -44,3 +53,9 @@ services:
     stdin_open: true
     tty: true
     command: ["/app/client"]
+    networks:
+      - rede_carregamento
+
+networks:
+  rede_carregamento:
+    driver: bridge
