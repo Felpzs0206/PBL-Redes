@@ -2,11 +2,22 @@
 
 # Subir o servidor e o charger com build
 build:
-	docker-compose up --build server charger
-
+	docker-compose build server charger client
 # Subir os serviços sem forçar rebuild
-up:
-	docker-compose up server charger
+build-server:
+	docker-compose build server
+build-charger:
+	docker-compose build charger
+build-client:
+	docker-compose build client
+up-server:
+	docker-compose up server
+
+up-charger:
+	docker-compose up charger
+
+run-client:
+	docker-compose run client
 
 # Derrubar os contêineres
 down:
@@ -16,15 +27,9 @@ down-client:
 	docker-compose stop client
 	docker-compose rm -f client
 
+
 # Remover imagens e volumes antigos
 clean:
 	docker system prune -a -f
-
-# Roda o client
-build-client:
-	docker-compose build client
-
-run-client:
-	docker-compose run client
 
 
