@@ -20,6 +20,7 @@ type Message struct {
 
 type Carro struct {
 	ID        string      `json:"id"`
+	Porta     string      `json:"porta"`
 	Latitude  float64     `json:"latitude"`
 	Longitude float64     `json:"longitude"`
 	Bateria   int         `json:"bateria"`
@@ -57,18 +58,19 @@ var (
 
 	carro = Carro{
 		ID:        "carro-" + os.Getenv("HOSTNAME") + "-" + strconv.Itoa(rand.Intn(1000)),
+		Porta:     ":6002",
 		Latitude:  rand.Float64()*180 - 90,
 		Longitude: rand.Float64()*360 - 180,
 		Bateria:   100,
+		Historico: []Historico{},
 	}
 )
 
 func main() {
-	go monitorarBateria(commandChan) // Bateria agora usa o mesmo canal
-	go entradaUsuario(commandChan)   // Entrada do usuário
+	// go monitorarBateria(commandChan) // Bateria agora usa o mesmo canal
+	go entradaUsuario(commandChan) // Entrada do usuário
 	mostrarMenu()
 	for cmd := range commandChan {
-
 		switch cmd {
 		case "1":
 			fmt.Println("\nListando pontos de recarga...")
@@ -78,10 +80,10 @@ func main() {
 			enviarMensagem(reservarPonto(carro))
 		case "3":
 			fmt.Println("\nInformando início do carregamento...")
-			enviarMensagem(inicioCarregamento(carro))
+			enviarMensagem(inicioCarregamento(&carro))
 		case "4":
 			fmt.Println("\nInformando fim do carregamento...")
-			enviarMensagem(fimCarregamento(carro))
+			enviarMensagem(fimCarregamento(&carro))
 		case "BATERIA_CRITICA":
 			fmt.Println("\nBateria em nível crítico! Conecte-se a um ponto de recarga.")
 			enviarMensagem(listarPontos(carro))
@@ -89,6 +91,27 @@ func main() {
 			fmt.Println("\nOpção inválida. Escolha uma opção válida.")
 		}
 		mostrarMenu()
+	}
+}
+
+// receber a response e tratar para lidar com os actions
+func handleServerResponse(r string) {
+
+	var response Message
+	err := json.Unmarshal([]byte(r), &response)
+	if err != nil {
+		fmt.Println("Erro ao decodificar a resposta do servidor:", err)
+		return
+	}
+	switch response.Action {
+	case "CARREGAMENTO_FINALIZADO":
+		fmt.Println("Valor do pagamento recebido:", response.Content["valor"])
+		carro.adicionarPagamento(response.Content["valor"].(float64))
+		fmt.Println("Pagamento adicionado ao histórico do carro.")
+		fmt.Println(carro)
+
+	default:
+		fmt.Println("Ação não reconhecida:", response.Action)
 	}
 }
 
@@ -108,7 +131,7 @@ func monitorarBateria(commandChan chan<- string) {
 		time.Sleep(5 * time.Second) // consumo de bateria
 		mutex.Lock()
 		carro.Bateria -= 10
-		if carro.Bateria < 0 {
+		if carro.Bateria < 10 {
 			carro.Bateria = 0
 		}
 		fmt.Printf("\nBateria - Nível atual: %d%%\n", carro.Bateria)
@@ -162,8 +185,9 @@ func enviarMensagem(msg Message) {
 		if err != nil {
 			break
 		}
-		fmt.Println("Resposta do servidor:", strings.TrimSpace(response))
+		handleServerResponse(response)
 	}
+
 }
 
 // Cria uma mensagem JSON para listar pontos de recarga
@@ -179,35 +203,76 @@ func listarPontos(carro Carro) Message {
 }
 
 // Cria uma mensagem JSON para reservar um ponto
+// Usuário deverá informar qual ponto deseja reservar
 func reservarPonto(carro Carro) Message {
 	return Message{
 		Action: fazerReservaAction,
 		Content: map[string]interface{}{
-			"ID": carro.ID,
+			"ID":      carro.ID,
+			"pontoID": "charger:6001",
 		},
 	}
 }
 
 // Informa o início do carregamento
-func inicioCarregamento(carro Carro) Message {
+func inicioCarregamento(c *Carro) Message {
+	novoHistorico := Historico{
+		ID: fmt.Sprintf("sessao-%d", time.Now().Unix()),
+		SessaoDeCarregamento: SessaoDeCarregamento{
+			Inicio: time.Now(),
+		},
+	}
+
+	fmt.Println(novoHistorico.SessaoDeCarregamento.Inicio)
+
+	c.Historico = append(c.Historico, novoHistorico)
+
 	return Message{
-		Action: inicioCarregamentoAction,
+		Action: "INICIO_CARREGAMENTO",
 		Content: map[string]interface{}{
-			"ID": carro.ID,
+			"ID":      c.ID,
+			"pontoID": "charger:6001",
 		},
 	}
 }
 
+// 	// Adiciona ao histórico do carro
+// 	c.Historico = append(c.Historico, novaSessao)
+
+// 	fmt.Println("Sessão de carregamento iniciada.")
+
+// 	return Message{
+// 		Action: inicioCarregamentoAction,
+// 		Content: map[string]interface{}{
+// 			"ID": c.ID,
+// 		},
+// 	}
+// }
+
 // Informa o fim do carregamento
-func fimCarregamento(carro Carro) Message {
+func fimCarregamento(c *Carro) Message {
+	c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Fim = time.Now()
+
+	tempoDecorrido := calcularTempoDecorrido(c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Inicio,
+		c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Fim)
+
 	return Message{
 		Action: fimCarregamentoAction,
 		Content: map[string]interface{}{
-			"ID": carro.ID,
+			"ID":      c.ID,
+			"pontoID": "charger:6001",
+			"tempo":   tempoDecorrido,
 		},
 	}
 }
 
+// }
 func calcularTempoDecorrido(inicio, fim time.Time) float64 {
 	return fim.Sub(inicio).Seconds()
+}
+
+func (c *Carro) adicionarPagamento(valor float64) {
+	c.Historico[len(c.Historico)-1].Pagamento.Valor = valor
+	c.Historico[len(c.Historico)-1].Pagamento.Pago = false
+	fmt.Println("Pagamento adicionado ao histórico do carro.")
 }

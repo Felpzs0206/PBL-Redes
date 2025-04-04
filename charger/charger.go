@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,14 +15,18 @@ type Message struct {
 	Content map[string]interface{} `json:"content"`
 }
 
-// Definição manual do ID e porta do ponto de recarga
+// Definição do ponto de recarga
 const (
 	ID   = "ponto_1" // Pode ser alterado para ponto_2, ponto_3, etc.
 	Port = ":6001"   // Porta específica para esse ponto de recarga
 )
 
-// Variáveis globais para armazenar a posição gerada
-var latitude, longitude float64
+// Variáveis globais
+var (
+	latitude, longitude float64
+	waitingQueue        []string   // Fila de espera para carros
+	queueMutex          sync.Mutex // Mutex para proteger acesso concorrente à fila
+)
 
 func main() {
 	// Gera a posição aleatória apenas uma vez na inicialização
@@ -56,31 +60,99 @@ func handleServerRequest(conn net.Conn) {
 		fmt.Println("Erro ao ler mensagem:", err)
 		return
 	}
+	//message = strings.TrimSpace(message)
+	fmt.Println("Mensagem recebida do Servidor:", message)
 
-	if strings.TrimSpace(message) == "LISTAR_PONTOS" {
-		fmt.Printf("Servidor solicitou informações do %s.\n", ID)
-
-		// Criando resposta em JSON com a posição fixa gerada na inicialização
-		responseData := Message{
-			Action: "INFORMACOES_DO_PONTO",
-			Content: map[string]interface{}{
-				"ID":        ID,
-				"latitude":  latitude,
-				"longitude": longitude,
-			},
-		}
-
-		// Convertendo a estrutura para JSON
-		jsonResponse, err := json.Marshal(responseData)
-		if err != nil {
-			fmt.Println("Erro ao converter para JSON:", err)
-			return
-		}
-
-		// Enviando resposta ao servidor
-		fmt.Fprintln(conn, string(jsonResponse))
-		fmt.Println("Dados enviados ao Servidor:", string(jsonResponse))
+	// Estrutura para armazenar o JSON recebido
+	var msg Message
+	err = json.Unmarshal([]byte(message), &msg)
+	if err != nil {
+		fmt.Println("Erro ao decodificar JSON:", err)
+		return
 	}
+
+	// Processa a ação recebida
+	switch msg.Action {
+	case "LISTAR_PONTOS":
+		handleListarPontos(conn)
+	case "RESERVAR_PONTO":
+		handleReservarPonto(conn, msg.Content)
+
+	default:
+		fmt.Println("Comando não reconhecido:", msg.Action)
+	}
+}
+
+func handleListarPontos(conn net.Conn) {
+	fmt.Printf("Servidor solicitou informações do %s.\n", ID)
+
+	// Criando resposta em JSON com a posição fixa gerada na inicialização
+	responseData := Message{
+		Action: "INFORMACOES_DO_PONTO",
+		Content: map[string]interface{}{
+			"ID":        ID,
+			"latitude":  latitude,
+			"longitude": longitude,
+			"fila":      getWaitingQueue(), // Mostra o estado atual da fila
+		},
+	}
+
+	sendResponse(conn, responseData)
+}
+
+func handleReservarPonto(conn net.Conn, content map[string]interface{}) {
+	// Obtém o ID do carro do JSON
+	carID, ok := content["carroID"].(string)
+	if !ok {
+		fmt.Println("Erro: campo 'carroID' ausente ou inválido")
+		return
+	}
+
+	// Adiciona o carro à fila de espera
+	queueMutex.Lock()
+	waitingQueue = append(waitingQueue, carID)
+	currentPosition := len(waitingQueue)
+	queueMutex.Unlock()
+
+	fmt.Printf("Carro %s adicionado à fila do ponto %s. Posição na fila: %d\n", carID, ID, currentPosition)
+
+	// Resposta ao servidor
+	responseData := Message{
+		Action: "RESERVA_CONFIRMADA",
+		Content: map[string]interface{}{
+			"ID":           ID,
+			"carroID":      carID,
+			"posicao_fila": currentPosition,
+			"latitude":     latitude,
+			"longitude":    longitude,
+		},
+	}
+
+	sendResponse(conn, responseData)
+}
+
+func sendResponse(conn net.Conn, responseData Message) {
+	// Convertendo a estrutura para JSON
+	jsonResponse, err := json.Marshal(responseData)
+	if err != nil {
+		fmt.Println("Erro ao converter para JSON:", err)
+		return
+	}
+
+	// Enviando resposta ao servidor
+	fmt.Fprintln(conn, string(jsonResponse))
+	fmt.Println("Dados enviados ao Servidor:", string(jsonResponse))
+}
+
+// Função segura para obter cópia da fila de espera
+func getWaitingQueue() []string {
+	queueMutex.Lock()
+	defer queueMutex.Unlock()
+
+	// Retorna uma cópia da fila para evitar acesso concorrente
+	queueCopy := make([]string, len(waitingQueue))
+	copy(queueCopy, waitingQueue)
+	return queueCopy
 }
 
 // Função para gerar latitude e longitude aleatórias uma única vez
