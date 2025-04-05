@@ -16,7 +16,7 @@ type Message struct {
 }
 
 // Lista de Pontos de Recarga e suas portas
-var pontosDeRecarga = []string{"charger:6001"}
+var pontosDeRecarga = []string{"charger:6001", "charger2:6002"}
 
 type PontoRecarga struct {
 	ID        string
@@ -82,6 +82,8 @@ func handleClient(conn net.Conn) {
 	}
 }
 
+// TODO:
+// Fazer mandar para os dois pontos de recarga (só está mandando para o primeiro)
 func handleListarPontos(conn net.Conn, request Message) {
 	fmt.Println("Cliente solicitou a lista de pontos de recarga.")
 	carro := request.Content
@@ -249,8 +251,12 @@ func obterInformacoesPonto(endereco string) PontoRecarga {
 	}
 	defer conn.Close()
 
-	// Enviar comando LISTAR_PONTOS
-	fmt.Fprintln(conn, "LISTAR_PONTOS")
+	// Enviar comando LISTAR_PONTOS como JSON
+	msg := Message{
+		Action:  "LISTAR_PONTOS",
+		Content: map[string]interface{}{},
+	}
+	sendResponse(conn, msg)
 
 	// Ler resposta
 	response, err := bufio.NewReader(conn).ReadString('\n')
@@ -260,18 +266,18 @@ func obterInformacoesPonto(endereco string) PontoRecarga {
 	}
 
 	// Decodificar resposta JSON
-	var msg Message
-	if err := json.Unmarshal([]byte(response), &msg); err != nil {
+	var msgResp Message
+	if err := json.Unmarshal([]byte(response), &msgResp); err != nil {
 		fmt.Printf("Resposta inválida do ponto %s: %v\n", endereco, err)
 		return PontoRecarga{}
 	}
 
-	if msg.Action != "INFORMACOES_DO_PONTO" {
-		fmt.Printf("Resposta inesperada do ponto %s: %s\n", endereco, msg.Action)
+	if msgResp.Action != "INFORMACOES_DO_PONTO" {
+		fmt.Printf("Resposta inesperada do ponto %s: %s\n", endereco, msgResp.Action)
 		return PontoRecarga{}
 	}
 
-	content := msg.Content
+	content := msgResp.Content
 	return PontoRecarga{
 		ID:        content["ID"].(string),
 		Latitude:  content["latitude"].(float64),
@@ -284,10 +290,22 @@ func convertInterfaceToStringSlice(data interface{}) []string {
 	if data == nil {
 		return nil
 	}
-	slice := data.([]interface{})
+
+	slice, ok := data.([]interface{})
+	if !ok {
+		fmt.Println("Erro: content['fila'] não é um []interface{} como esperado")
+		return nil
+	}
+
 	result := make([]string, len(slice))
 	for i, v := range slice {
-		result[i] = v.(string)
+		str, ok := v.(string)
+		if !ok {
+			fmt.Printf("Erro: item na fila não é string (index %d): %v\n", i, v)
+			result[i] = fmt.Sprintf("%v", v) // fallback
+		} else {
+			result[i] = str
+		}
 	}
 	return result
 }

@@ -14,18 +14,36 @@ services:
 
   charger:
     build:
-      context: ./charger  # Agora corretamente aponta para o diretório charger
+      context: ./charger
       dockerfile: Dockerfile
     container_name: ponto_de_recarga_1
     ports:
       - "6001:6001"
     environment:
-      - ID=ponto_1
+      - ID=charger:6001
       - LAT=-23.5505
       - LON=-46.6333
       - PORT=6001
     depends_on:
-      - server  # Espera o servidor iniciar antes de rodar o charger
+      - server
+    command: ["/app/charger"]
+    networks:
+      - rede_carregamento
+
+  charger2:
+    build:
+      context: ./charger
+      dockerfile: Dockerfile
+    container_name: ponto_de_recarga_2
+    ports:
+      - "6002:6002"
+    environment:
+      - ID=charger2:6002
+      - LAT=-22.9068
+      - LON=-43.1729
+      - PORT=6002
+    depends_on:
+      - server
     command: ["/app/charger"]
     networks:
       - rede_carregamento
@@ -39,6 +57,11 @@ services:
       - server
     stdin_open: true
     tty: true
+    environment:
+      - ID=carro_1
+      - PORTA=6003
+      - LAT=-23.5505
+      - LON=-46.6333
     command: ["/app/client"]
     networks:
       - rede_carregamento
@@ -52,9 +75,15 @@ services:
       - server
     stdin_open: true
     tty: true
+    environment:
+      - ID=carro_2
+      - PORTA=6004
+      - LAT=-22.9068
+      - LON=-43.1729
     command: ["/app/client"]
     networks:
       - rede_carregamento
+
 
 networks:
   rede_carregamento:

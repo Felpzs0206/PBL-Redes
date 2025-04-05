@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+// ERROS
+// Cliente consegue se colocar na fila de espera mais de uma vez
+// Cliente ainda não escolhe qual ponto deseja reservar
+
 type Message struct {
 	Action  string                 `json:"action"`
 	Content map[string]interface{} `json:"content"`
@@ -55,10 +59,11 @@ var (
 	mutex         sync.Mutex // Proteção contra condições de corrida
 	commandChan   = make(chan string)
 	alertaEnviado bool
+	porta         = os.Getenv("PORTA")
 
 	carro = Carro{
 		ID:        "carro-" + os.Getenv("HOSTNAME") + "-" + strconv.Itoa(rand.Intn(1000)),
-		Porta:     ":6002",
+		Porta:     porta,
 		Latitude:  rand.Float64()*180 - 90,
 		Longitude: rand.Float64()*360 - 180,
 		Bateria:   100,
@@ -96,6 +101,9 @@ func main() {
 
 // receber a response e tratar para lidar com os actions
 func handleServerResponse(r string) {
+	//TODO
+	// Formatar os prints
+	// Tratar CARREGAMENTO_INICIADO e RESERVA_CONFIRMADA
 
 	var response Message
 	err := json.Unmarshal([]byte(r), &response)
@@ -109,7 +117,16 @@ func handleServerResponse(r string) {
 		carro.adicionarPagamento(response.Content["valor"].(float64))
 		fmt.Println("Pagamento adicionado ao histórico do carro.")
 		fmt.Println(carro)
-
+	case "LISTA_PONTOS":
+		//TODO
+		// Cliente deve escolher qual ponto deseja reservar
+		fmt.Println(response)
+		pontos := response.Content["pontos"].([]interface{})
+		fmt.Println("Lista de pontos de recarga disponíveis:")
+		for _, ponto := range pontos {
+			pontoMap := ponto.(map[string]interface{})
+			fmt.Printf("ID: %s, Distância: %.2f km\n", pontoMap["ID"], pontoMap["Distancia"])
+		}
 	default:
 		fmt.Println("Ação não reconhecida:", response.Action)
 	}
