@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -15,14 +16,10 @@ type Message struct {
 	Content map[string]interface{} `json:"content"`
 }
 
-// Definição do ponto de recarga
-const (
-	ID   = "ponto_1" // Pode ser alterado para ponto_2, ponto_3, etc.
-	Port = ":6001"   // Porta específica para esse ponto de recarga
-)
-
 // Variáveis globais
 var (
+	ID                  = os.Getenv("ID")   // Pode ser alterado para ponto_2, ponto_3, etc.
+	Port                = os.Getenv("PORT") // Porta específica para esse ponto de recarga
 	latitude, longitude float64
 	waitingQueue        []string   // Fila de espera para carros
 	queueMutex          sync.Mutex // Mutex para proteger acesso concorrente à fila
@@ -33,6 +30,11 @@ func main() {
 	latitude, longitude = gerarPosicaoAleatoria()
 
 	// Inicializa o listener na porta especificada
+	// Garante que a porta tenha o formato ":6001"
+	if Port != "" && Port[0] != ':' {
+		Port = ":" + Port
+	}
+
 	listener, err := net.Listen("tcp", Port)
 	if err != nil {
 		fmt.Println("Erro ao iniciar o ponto de recarga:", err)
