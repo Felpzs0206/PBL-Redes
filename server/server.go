@@ -77,10 +77,32 @@ func handleClient(conn net.Conn) {
 		handleInicioCarregamento(conn, request)
 	case "FIM_CARREGAMENTO":
 		handleFimCarregamento(conn, request)
+	case "PAGAR_PENDENCIA":
+		handlePagarPendencia(conn, request.Content)
 	default:
 		fmt.Println("Ação desconhecida:", request.Action)
 		sendErrorResponse(conn, "Ação desconhecida")
 	}
+}
+
+func handlePagarPendencia(conn net.Conn, content map[string]interface{}) {
+	fmt.Println("Recebido pedido de pagamento do carro:", content["carroID"])
+
+	historicoID, ok := content["historicoID"].(string)
+	if !ok {
+		sendErrorResponse(conn, "ID da sessão inválido")
+		return
+	}
+
+	response := Message{
+		Action: "PAGAMENTO_CONFIRMADO",
+		Content: map[string]interface{}{
+			"historicoID": historicoID,
+			"mensagem":    fmt.Sprintf("Pagamento da sessão %v recebido com sucesso.", historicoID),
+		},
+	}
+
+	sendResponse(conn, response)
 }
 
 func handleListarPontos(conn net.Conn, request Message) {
@@ -266,6 +288,11 @@ func handleFimCarregamento(conn net.Conn, request Message) {
 	carroID := carro["ID"].(string)
 	pontoID := carro["pontoID"].(string)
 	tempo := carro["tempo"].(float64)
+	isCarregando := carro["isCarregando"].(bool)
+	if !isCarregando {
+		sendErrorResponse(conn, "Carro não está carregando")
+		return
+	}
 
 	// Buscar o endereço do ponto de recarga
 	var enderecoPonto string

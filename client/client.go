@@ -31,7 +31,7 @@ type Carro struct {
 }
 
 type Historico struct {
-	ID                   string               `json:"id"`
+	ID                   string               `json:"historicoID"`
 	SessaoDeCarregamento SessaoDeCarregamento `json:"sessao_de_carregamento"`
 	Pagamento            Pagamento            `json:"pagamento"`
 }
@@ -74,13 +74,12 @@ var (
 )
 
 func main() {
-	go entradaUsuario(commandChan) // Captura entrada do usuário
+	go entradaUsuario(commandChan)   // Captura entrada do usuário
+	go monitorarBateria(commandChan) // Monitora a bateria
+
+	var modoReserva bool = false // Modo de reserva de ponto
 	mostrarMenu()
-
-	var modoReserva bool = false
-
 	for cmd := range commandChan {
-		// Modo de seleção de ponto após o usuário listar e escolher reservar
 		if modoReserva {
 			escolha, err := strconv.Atoi(cmd)
 			if err != nil || escolha < 1 || escolha > len(ultimosPontosRecebidos) {
@@ -104,9 +103,9 @@ func main() {
 		}
 
 		switch strings.ToUpper(cmd) {
-		case "L":
-			fmt.Println("\nListando pontos de recarga...")
-			enviarMensagem(listarPontos(carro))
+		// case "L":
+		// 	fmt.Println("\nListando pontos de recarga...")
+		// 	enviarMensagem(listarPontos(carro))
 
 		case "R":
 			if len(ultimosPontosRecebidos) == 0 {
@@ -117,21 +116,25 @@ func main() {
 			modoReserva = true
 
 		case "I":
-			fmt.Println("\nInformando início do carregamento...")
+			fmt.Println("\n-> Informando início do carregamento...")
 			enviarMensagem(inicioCarregamento(&carro))
 
 		case "F":
-			fmt.Println("\nInformando fim do carregamento...")
+			fmt.Println("\n-> Informando fim do carregamento...")
 			enviarMensagem(fimCarregamento(&carro))
 
 		case "B":
-			fmt.Println("\nBateria em nível crítico! Listando pontos...")
+			fmt.Println("\n-> Bateria em nível crítico! Listando pontos...")
 			enviarMensagem(listarPontos(carro))
+		case "P":
+			fmt.Println("\n-> Pagando última pendência...")
+			if msg := pagarUltimaPendenciaEmAberto(carro.Historico, carro.ID); msg != nil {
+				enviarMensagem(*msg)
+			}
 
 		default:
-			fmt.Println("\nComando inválido. Use L, R, I, F ou B.")
+			fmt.Println("\n-> Comando inválido. Use B, R, I, F ou P.")
 		}
-
 		mostrarMenu()
 	}
 }
@@ -157,6 +160,8 @@ func handleServerResponse(r string) {
 		handleReservaConfirmada(response.Content)
 	case "CARREGAMENTO_INICIADO":
 		handleCarregamentoInciado(response.Content)
+	case "PAGAMENTO_CONFIRMADO":
+		handlePagamentoConfirmado(response, &carro.Historico)
 	case "ERRO":
 		fmt.Println("Erro:", response.Content["mensagem"])
 	default:
@@ -215,18 +220,61 @@ func handleListaPontos(content map[string]interface{}) []map[string]interface{} 
 		pontosFormatados = append(pontosFormatados, pontoMap)
 	}
 
-	fmt.Println("Digite 'R' para reservar um ponto, seguido do número do ponto (ex: 1, 2...).")
+	fmt.Println("Digite 'R' para reservar um ponto, Em seguida, informe o do número do ponto na lista (ex: 1, 2...).")
 	return pontosFormatados
+}
+
+func pagarUltimaPendenciaEmAberto(historico []Historico, carroID string) *Message {
+	// Percorre o histórico de trás para frente
+	for i := len(historico) - 1; i >= 0; i-- {
+		if !historico[i].Pagamento.Pago {
+			msg := Message{
+				Action: "PAGAR_PENDENCIA",
+				Content: map[string]interface{}{
+					"carroID":     carroID,
+					"historicoID": historico[i].ID,
+					"valor":       historico[i].Pagamento.Valor,
+				},
+			}
+			return &msg
+		}
+	}
+
+	// Se não houver nenhuma pendência
+	fmt.Println("Nenhuma pendência em aberto para pagamento.")
+	return nil
+}
+
+func handlePagamentoConfirmado(msg Message, historico *[]Historico) {
+	historicoID, ok := msg.Content["historicoID"].(string)
+	if !ok {
+		fmt.Println("Erro: historicoID inválido ou ausente na resposta do servidor.")
+		return
+	}
+
+	for i := range *historico {
+		if (*historico)[i].ID == historicoID {
+			if (*historico)[i].Pagamento.Pago {
+				fmt.Printf("Sessão %s já está marcada como paga.\n", historicoID)
+			} else {
+				(*historico)[i].Pagamento.Pago = true
+				fmt.Printf("Pagamento da sessão %s confirmado e marcado como pago.\n", historicoID)
+			}
+			return
+		}
+	}
+
+	fmt.Printf("Sessão %s não encontrada no histórico local.\n", historicoID)
 }
 
 // Mostra o menu de opções para o usuário
 func mostrarMenu() {
 	fmt.Println("\n--- MENU ---")
-	fmt.Println("L - Listar pontos de recarga")
+	fmt.Println("B - Bateria crítica")
 	fmt.Println("R - Reservar ponto de recarga")
 	fmt.Println("I - Iniciar carregamento")
 	fmt.Println("F - Finalizar carregamento")
-	fmt.Println("B - Verificar bateria (modo automático)")
+	fmt.Println("P - Pagar última pendência")
 	fmt.Print("Escolha uma opção: ")
 }
 
@@ -239,11 +287,16 @@ func monitorarBateria(commandChan chan<- string) {
 		if carro.Bateria < 10 {
 			carro.Bateria = 0
 		}
+
+		if carro.Bateria == 0 {
+			mutex.Unlock()
+			continue
+		}
 		fmt.Printf("\nBateria - Nível atual: %d%%\n", carro.Bateria)
 
 		// envia alerta apenas uma vez quando a bateria chega a 20%
 		if carro.Bateria <= 20 && !alertaEnviado {
-			commandChan <- "BATERIA_CRITICA"
+			commandChan <- "B"
 			alertaEnviado = true
 		}
 		mutex.Unlock()
@@ -308,6 +361,7 @@ func listarPontos(carro Carro) Message {
 }
 
 // Informa o início do carregamento
+// Informa o início do carregamento
 func inicioCarregamento(c *Carro) Message {
 	novoHistorico := Historico{
 		ID: fmt.Sprintf("sessao-%d", time.Now().Unix()),
@@ -324,7 +378,7 @@ func inicioCarregamento(c *Carro) Message {
 		Action: "INICIO_CARREGAMENTO",
 		Content: map[string]interface{}{
 			"ID":      c.ID,
-			"pontoID": "charger:6001",
+			"pontoID": c.PontoReservado, // <- USANDO A RESERVA REAL
 		},
 	}
 }
@@ -333,15 +387,18 @@ func inicioCarregamento(c *Carro) Message {
 func fimCarregamento(c *Carro) Message {
 	c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Fim = time.Now()
 
-	tempoDecorrido := calcularTempoDecorrido(c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Inicio,
-		c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Fim)
+	tempoDecorrido := calcularTempoDecorrido(
+		c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Inicio,
+		c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Fim,
+	)
 
 	return Message{
 		Action: fimCarregamentoAction,
 		Content: map[string]interface{}{
-			"ID":      c.ID,
-			"pontoID": "charger:6001",
-			"tempo":   tempoDecorrido,
+			"ID":           c.ID,
+			"pontoID":      c.PontoReservado,
+			"tempo":        tempoDecorrido,
+			"isCarregando": c.isCarregando,
 		},
 	}
 }
