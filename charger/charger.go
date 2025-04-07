@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -79,7 +80,11 @@ func handleServerRequest(conn net.Conn) {
 		handleListarPontos(conn)
 	case "RESERVAR_PONTO":
 		handleReservarPonto(conn, msg.Content)
-
+	case "VERIFICAR_PRIORIDADE":
+		handleVerificarPrioridade(conn, msg)
+	case "ENCERRAR_RESERVA":
+		fmt.Println("RECEBIDO ENCERRAR RESERVA")
+		handleEncerrarReserva(conn, msg.Content)
 	default:
 		fmt.Println("Comando não reconhecido:", msg.Action)
 	}
@@ -106,7 +111,7 @@ func handleReservarPonto(conn net.Conn, content map[string]interface{}) {
 	// Obtém o ID do carro do JSON
 	carID, ok := content["carroID"].(string)
 	if !ok {
-		fmt.Println("Erro: campo 'carroID' ausente ou inválido")
+		fmt.Println("Erro: campo 'ID' ausente ou inválido")
 		return
 	}
 
@@ -133,6 +138,25 @@ func handleReservarPonto(conn net.Conn, content map[string]interface{}) {
 	sendResponse(conn, responseData)
 }
 
+func handleVerificarPrioridade(conn net.Conn, request Message) {
+	carroID := request.Content["carroID"].(string)
+
+	var acao string
+	if len(waitingQueue) > 0 && waitingQueue[0] == carroID {
+		acao = "PRIMEIRO_DA_FILA"
+	} else {
+		acao = "NAO_EH_PRIORITARIO"
+	}
+
+	response := Message{
+		Action: acao,
+		Content: map[string]interface{}{
+			"mensagem": fmt.Sprintf("Carro %s é o primeiro da fila? %v", carroID, acao == "PRIMEIRO_DA_FILA"),
+		},
+	}
+	sendResponse(conn, response)
+}
+
 func sendResponse(conn net.Conn, responseData Message) {
 	// Convertendo a estrutura para JSON
 	jsonResponse, err := json.Marshal(responseData)
@@ -144,6 +168,52 @@ func sendResponse(conn net.Conn, responseData Message) {
 	// Enviando resposta ao servidor
 	fmt.Fprintln(conn, string(jsonResponse))
 	fmt.Println("Dados enviados ao Servidor:", string(jsonResponse))
+}
+
+func handleEncerrarReserva(conn net.Conn, content map[string]interface{}) {
+	fmt.Println("Tentativa de encerrar reserva do carro")
+	carID, ok := content["carroID"].(string)
+	if !ok {
+		fmt.Println("Erro: campo 'carroID' ausente ou inválido")
+		return
+	}
+
+	responseData := Message{
+		Action: "RESERVA_ENCERRADA",
+		Content: map[string]interface{}{
+			"ID":       ID,
+			"carroID":  carID,
+			"sucesso":  false,
+			"mensagem": "Carro não encontrado na posição 0 da fila",
+		},
+	}
+
+	queueMutex.Lock()
+	defer queueMutex.Unlock()
+
+	if len(waitingQueue) == 0 {
+		fmt.Println("Fila vazia. Nada a remover.")
+		sendResponse(conn, responseData)
+		return
+	}
+
+	primeiro := strings.TrimSpace(waitingQueue[0])
+	requisitado := strings.TrimSpace(carID)
+
+	fmt.Printf("Comparando carroID recebido (%q | %v) com o primeiro da fila (%q | %v)\n",
+		requisitado, []byte(requisitado), primeiro, []byte(primeiro))
+
+	if primeiro == requisitado {
+		waitingQueue = waitingQueue[1:]
+		responseData.Content["sucesso"] = true
+		responseData.Content["mensagem"] = "Reserva encerrada com sucesso"
+		fmt.Printf("Reserva do carro %s encerrada no ponto %s\n", carID, ID)
+	} else {
+		fmt.Printf("Tentativa de encerrar reserva do carro %s falhou - não está na posição 0 (era %s)\n", carID, waitingQueue[0])
+	}
+
+	fmt.Println("Fila de espera atual:", waitingQueue)
+	sendResponse(conn, responseData)
 }
 
 // Função segura para obter cópia da fila de espera
