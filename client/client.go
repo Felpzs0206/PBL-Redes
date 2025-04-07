@@ -13,22 +13,21 @@ import (
 	"time"
 )
 
-// ERROS
-// Cliente consegue se colocar na fila de espera mais de uma vez
-// Cliente ainda não escolhe qual ponto deseja reservar
-
 type Message struct {
 	Action  string                 `json:"action"`
 	Content map[string]interface{} `json:"content"`
 }
 
 type Carro struct {
-	ID        string      `json:"id"`
-	Porta     string      `json:"porta"`
-	Latitude  float64     `json:"latitude"`
-	Longitude float64     `json:"longitude"`
-	Bateria   int         `json:"bateria"`
-	Historico []Historico `json:"historico"`
+	ID             string      `json:"id"`
+	Porta          string      `json:"porta"`
+	Latitude       float64     `json:"latitude"`
+	Longitude      float64     `json:"longitude"`
+	Bateria        int         `json:"bateria"`
+	Historico      []Historico `json:"historico"`
+	EmFila         bool        `json:"em_fila"`
+	PontoReservado string      `json:"ponto_reservado"`
+	isCarregando   bool        `json:"is_carregando"`
 }
 
 type Historico struct {
@@ -55,46 +54,84 @@ const (
 )
 
 var (
-	serverAddr    = "server:5000"
-	mutex         sync.Mutex // Proteção contra condições de corrida
-	commandChan   = make(chan string)
-	alertaEnviado bool
-	porta         = os.Getenv("PORTA")
+	serverAddr             = "server:5000"
+	mutex                  sync.Mutex // Proteção contra condições de corrida
+	commandChan            = make(chan string)
+	alertaEnviado          bool
+	porta                  = os.Getenv("PORTA")
+	ultimosPontosRecebidos []map[string]interface{}
 
 	carro = Carro{
-		ID:        "carro-" + os.Getenv("HOSTNAME") + "-" + strconv.Itoa(rand.Intn(1000)),
-		Porta:     porta,
-		Latitude:  rand.Float64()*180 - 90,
-		Longitude: rand.Float64()*360 - 180,
-		Bateria:   100,
-		Historico: []Historico{},
+		ID:           "carro-" + os.Getenv("HOSTNAME") + "-" + strconv.Itoa(rand.Intn(1000)),
+		Porta:        porta,
+		Latitude:     rand.Float64()*180 - 90,
+		Longitude:    rand.Float64()*360 - 180,
+		Bateria:      100,
+		Historico:    []Historico{},
+		EmFila:       false,
+		isCarregando: false,
 	}
 )
 
 func main() {
-	// go monitorarBateria(commandChan) // Bateria agora usa o mesmo canal
-	go entradaUsuario(commandChan) // Entrada do usuário
+	go entradaUsuario(commandChan) // Captura entrada do usuário
 	mostrarMenu()
+
+	var modoReserva bool = false
+
 	for cmd := range commandChan {
-		switch cmd {
-		case "1":
+		// Modo de seleção de ponto após o usuário listar e escolher reservar
+		if modoReserva {
+			escolha, err := strconv.Atoi(cmd)
+			if err != nil || escolha < 1 || escolha > len(ultimosPontosRecebidos) {
+				fmt.Println("Escolha inválida. Digite o número do ponto mostrado na lista.")
+				continue
+			}
+			pontoEscolhido := ultimosPontosRecebidos[escolha-1]
+			fmt.Printf("Reservando ponto de recarga: %s\n", pontoEscolhido["ID"])
+
+			msg := Message{
+				Action: "RESERVAR_PONTO",
+				Content: map[string]interface{}{
+					"ID":      carro.ID,
+					"pontoID": pontoEscolhido["ID"],
+					"EmFila":  carro.EmFila,
+				},
+			}
+			enviarMensagem(msg)
+			modoReserva = false
+			continue
+		}
+
+		switch strings.ToUpper(cmd) {
+		case "L":
 			fmt.Println("\nListando pontos de recarga...")
 			enviarMensagem(listarPontos(carro))
-		case "2":
-			fmt.Println("\nReservando ponto de recarga...")
-			enviarMensagem(reservarPonto(carro))
-		case "3":
+
+		case "R":
+			if len(ultimosPontosRecebidos) == 0 {
+				fmt.Println("Você precisa listar os pontos antes de reservar.")
+				continue
+			}
+			fmt.Println("Digite o número do ponto que deseja reservar:")
+			modoReserva = true
+
+		case "I":
 			fmt.Println("\nInformando início do carregamento...")
 			enviarMensagem(inicioCarregamento(&carro))
-		case "4":
+
+		case "F":
 			fmt.Println("\nInformando fim do carregamento...")
 			enviarMensagem(fimCarregamento(&carro))
-		case "BATERIA_CRITICA":
-			fmt.Println("\nBateria em nível crítico! Conecte-se a um ponto de recarga.")
+
+		case "B":
+			fmt.Println("\nBateria em nível crítico! Listando pontos...")
 			enviarMensagem(listarPontos(carro))
+
 		default:
-			fmt.Println("\nOpção inválida. Escolha uma opção válida.")
+			fmt.Println("\nComando inválido. Use L, R, I, F ou B.")
 		}
+
 		mostrarMenu()
 	}
 }
@@ -103,7 +140,6 @@ func main() {
 func handleServerResponse(r string) {
 	//TODO
 	// Formatar os prints
-	// Tratar CARREGAMENTO_INICIADO e RESERVA_CONFIRMADA
 
 	var response Message
 	err := json.Unmarshal([]byte(r), &response)
@@ -113,32 +149,84 @@ func handleServerResponse(r string) {
 	}
 	switch response.Action {
 	case "CARREGAMENTO_FINALIZADO":
-		fmt.Println("Valor do pagamento recebido:", response.Content["valor"])
-		carro.adicionarPagamento(response.Content["valor"].(float64))
-		fmt.Println("Pagamento adicionado ao histórico do carro.")
-		fmt.Println(carro)
+		handleCarregamentoFinalizado(response.Content)
 	case "LISTA_PONTOS":
-		//TODO
-		// Cliente deve escolher qual ponto deseja reservar
-		fmt.Println(response)
-		pontos := response.Content["pontos"].([]interface{})
-		fmt.Println("Lista de pontos de recarga disponíveis:")
-		for _, ponto := range pontos {
-			pontoMap := ponto.(map[string]interface{})
-			fmt.Printf("ID: %s, Distância: %.2f km\n", pontoMap["ID"], pontoMap["Distancia"])
-		}
+		ultimosPontosRecebidos = handleListaPontos(response.Content)
+		fmt.Println("Pontos de recarga listados com sucesso!")
+	case "RESERVA_CONFIRMADA":
+		handleReservaConfirmada(response.Content)
+	case "CARREGAMENTO_INICIADO":
+		handleCarregamentoInciado(response.Content)
+	case "ERRO":
+		fmt.Println("Erro:", response.Content["mensagem"])
 	default:
 		fmt.Println("Ação não reconhecida:", response.Action)
 	}
 }
 
+func handleCarregamentoInciado(content map[string]interface{}) {
+	fmt.Println("Carregamento iniciado com sucesso!")
+	carro.isCarregando = true
+	fmt.Println("ID do ponto de recarga:", content["pontoID"])
+}
+
+func handleCarregamentoFinalizado(content map[string]interface{}) {
+	fmt.Println("Carregamento finalizado com sucesso!")
+	fmt.Println("Valor do pagamento:", content["valor"])
+	carro.adicionarPagamento(content["valor"].(float64))
+	fmt.Println("Pagamento adicionado ao histórico do carro.")
+	carro.isCarregando = false
+	carro.EmFila = false
+	carro.Bateria = 100
+	fmt.Println(carro)
+}
+
+func handleReservaConfirmada(content map[string]interface{}) {
+	fmt.Println("Reserva confirmada com sucesso!")
+	carro.EmFila = true
+	carro.PontoReservado = content["ID"].(string)
+	fmt.Println("Ponto reservado:", carro.PontoReservado)
+}
+
+func handleListaPontos(content map[string]interface{}) []map[string]interface{} {
+	pontosRaw := content["pontos"].([]interface{})
+	var pontosFormatados []map[string]interface{}
+
+	fmt.Println("\nLista de pontos de recarga disponíveis:")
+	for i, ponto := range pontosRaw {
+		pontoMap := ponto.(map[string]interface{})
+
+		distancia, okDist := pontoMap["Distancia"].(float64)
+		tamanhoFilaFloat, okFila := pontoMap["TamanhoFila"].(float64) // <- atenção aqui!
+
+		if !okDist || !okFila {
+			fmt.Printf("%d) Dados inválidos para o ponto\n", i+1)
+			continue
+		}
+
+		fmt.Printf(
+			"%d) ID: %s, Distância: %.2f km, Fila: %d carro(s)\n",
+			i+1,
+			pontoMap["ID"],
+			distancia,
+			int(tamanhoFilaFloat), // conversão segura
+		)
+
+		pontosFormatados = append(pontosFormatados, pontoMap)
+	}
+
+	fmt.Println("Digite 'R' para reservar um ponto, seguido do número do ponto (ex: 1, 2...).")
+	return pontosFormatados
+}
+
 // Mostra o menu de opções para o usuário
 func mostrarMenu() {
-	fmt.Println("\n==== MENU PRINCIPAL ====")
-	fmt.Println("1. Listar pontos de recarga")
-	fmt.Println("2. Reservar ponto de recarga")
-	fmt.Println("3. Informar início do carregamento")
-	fmt.Println("4. Informar fim do carregamento")
+	fmt.Println("\n--- MENU ---")
+	fmt.Println("L - Listar pontos de recarga")
+	fmt.Println("R - Reservar ponto de recarga")
+	fmt.Println("I - Iniciar carregamento")
+	fmt.Println("F - Finalizar carregamento")
+	fmt.Println("B - Verificar bateria (modo automático)")
 	fmt.Print("Escolha uma opção: ")
 }
 
@@ -219,18 +307,6 @@ func listarPontos(carro Carro) Message {
 	}
 }
 
-// Cria uma mensagem JSON para reservar um ponto
-// Usuário deverá informar qual ponto deseja reservar
-func reservarPonto(carro Carro) Message {
-	return Message{
-		Action: fazerReservaAction,
-		Content: map[string]interface{}{
-			"ID":      carro.ID,
-			"pontoID": "charger:6001",
-		},
-	}
-}
-
 // Informa o início do carregamento
 func inicioCarregamento(c *Carro) Message {
 	novoHistorico := Historico{
@@ -253,19 +329,6 @@ func inicioCarregamento(c *Carro) Message {
 	}
 }
 
-// 	// Adiciona ao histórico do carro
-// 	c.Historico = append(c.Historico, novaSessao)
-
-// 	fmt.Println("Sessão de carregamento iniciada.")
-
-// 	return Message{
-// 		Action: inicioCarregamentoAction,
-// 		Content: map[string]interface{}{
-// 			"ID": c.ID,
-// 		},
-// 	}
-// }
-
 // Informa o fim do carregamento
 func fimCarregamento(c *Carro) Message {
 	c.Historico[len(c.Historico)-1].SessaoDeCarregamento.Fim = time.Now()
@@ -283,7 +346,6 @@ func fimCarregamento(c *Carro) Message {
 	}
 }
 
-// }
 func calcularTempoDecorrido(inicio, fim time.Time) float64 {
 	return fim.Sub(inicio).Seconds()
 }

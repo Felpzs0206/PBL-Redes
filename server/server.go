@@ -19,11 +19,12 @@ type Message struct {
 var pontosDeRecarga = []string{"charger:6001", "charger2:6002"}
 
 type PontoRecarga struct {
-	ID        string
-	Latitude  float64
-	Longitude float64
-	Distancia float64
-	Fila      []string // Adicionado campo para a fila de espera
+	ID          string   `json:"ID"`
+	Latitude    float64  `json:"latitude"`
+	Longitude   float64  `json:"longitude"`
+	Fila        []string `json:"fila"`
+	TamanhoFila int      `json:"TamanhoFila"`
+	Distancia   float64  `json:"Distancia"`
 }
 
 var (
@@ -82,8 +83,6 @@ func handleClient(conn net.Conn) {
 	}
 }
 
-// TODO:
-// Fazer mandar para os dois pontos de recarga (só está mandando para o primeiro)
 func handleListarPontos(conn net.Conn, request Message) {
 	fmt.Println("Cliente solicitou a lista de pontos de recarga.")
 	carro := request.Content
@@ -125,10 +124,17 @@ func handleListarPontos(conn net.Conn, request Message) {
 
 func handleReservarPonto(conn net.Conn, request Message) {
 	fmt.Println("Cliente solicitou reserva de ponto de recarga.")
-	carro := request.Content
-	carroID := carro["ID"].(string)
-	pontoID := carro["pontoID"].(string)
+	fmt.Println("Conteúdo recebido na requisição de reserva:", request.Content)
 
+	carroID := request.Content["ID"].(string)
+	pontoID := request.Content["pontoID"].(string)
+	EmFila := request.Content["EmFila"].(bool)
+
+	if EmFila {
+		fmt.Println("Carro já está na fila, não é necessário reservar novamente.")
+		sendErrorResponse(conn, "Carro já está na fila")
+		return
+	}
 	// Encontrar o endereço do ponto desejado
 	var enderecoPonto string
 	for _, endereco := range pontosDeRecarga {
@@ -184,16 +190,62 @@ func handleInicioCarregamento(conn net.Conn, request Message) {
 	carroID := carro["ID"].(string)
 	pontoID := carro["pontoID"].(string)
 
+	// Buscar o endereço do ponto de recarga
+	var enderecoPonto string
+	for _, endereco := range pontosDeRecarga {
+		if strings.Contains(endereco, pontoID) {
+			enderecoPonto = endereco
+			break
+		}
+	}
+	if enderecoPonto == "" {
+		sendErrorResponse(conn, "Ponto de recarga não encontrado")
+		return
+	}
+
+	// Verificar com o ponto se o carro é o primeiro da fila
+	connPonto, err := net.Dial("tcp", enderecoPonto)
+	if err != nil {
+		sendErrorResponse(conn, fmt.Sprintf("Erro ao conectar ao ponto: %v", err))
+		return
+	}
+	defer connPonto.Close()
+
+	msgVerificacao := Message{
+		Action: "VERIFICAR_PRIORIDADE",
+		Content: map[string]interface{}{
+			"carroID": carroID,
+		},
+	}
+	sendResponse(connPonto, msgVerificacao)
+
+	// Ler resposta do ponto
+	respostaStr, err := bufio.NewReader(connPonto).ReadString('\n')
+	if err != nil {
+		sendErrorResponse(conn, "Erro ao ler resposta do ponto")
+		return
+	}
+
+	var respostaVerificacao Message
+	if err := json.Unmarshal([]byte(respostaStr), &respostaVerificacao); err != nil {
+		sendErrorResponse(conn, "Resposta inválida do ponto")
+		return
+	}
+
+	if respostaVerificacao.Action != "PRIMEIRO_DA_FILA" {
+		sendErrorResponse(conn, "Carro não é o primeiro da fila")
+		return
+	}
+
+	// Se for o primeiro, inicia o carregamento
 	carregamentoMutex.Lock()
 	defer carregamentoMutex.Unlock()
 
-	// Verificar se o ponto está disponível
 	if _, exists := carrosEmCarregamento[pontoID]; exists {
 		sendErrorResponse(conn, "Ponto já está em uso")
 		return
 	}
 
-	// Registrar carregamento
 	carrosEmCarregamento[pontoID] = carroID
 
 	response := Message{
@@ -205,7 +257,6 @@ func handleInicioCarregamento(conn net.Conn, request Message) {
 	}
 
 	fmt.Println("Carregamento iniciado:", pontoID, carroID)
-	fmt.Println(response)
 	sendResponse(conn, response)
 }
 
@@ -216,19 +267,76 @@ func handleFimCarregamento(conn net.Conn, request Message) {
 	pontoID := carro["pontoID"].(string)
 	tempo := carro["tempo"].(float64)
 
+	// Buscar o endereço do ponto de recarga
+	var enderecoPonto string
+	for _, endereco := range pontosDeRecarga {
+		if strings.Contains(endereco, pontoID) {
+			enderecoPonto = endereco
+			break
+		}
+	}
+	if enderecoPonto == "" {
+		sendErrorResponse(conn, "Ponto de recarga não encontrado")
+		return
+	}
+
+	// Verificar com o ponto se o carro é o primeiro da fila
+	connPonto, err := net.Dial("tcp", enderecoPonto)
+	if err != nil {
+		sendErrorResponse(conn, fmt.Sprintf("Erro ao conectar ao ponto: %v", err))
+		return
+	}
+	defer connPonto.Close()
+
+	msgVerificacao := Message{
+		Action: "VERIFICAR_PRIORIDADE",
+		Content: map[string]interface{}{
+			"carroID": carroID,
+		},
+	}
+	sendResponse(connPonto, msgVerificacao)
+
+	respostaStr, err := bufio.NewReader(connPonto).ReadString('\n')
+	if err != nil {
+		sendErrorResponse(conn, "Erro ao ler resposta do ponto (verificação de prioridade)")
+		return
+	}
+
+	var respostaVerificacao Message
+	if err := json.Unmarshal([]byte(respostaStr), &respostaVerificacao); err != nil {
+		sendErrorResponse(conn, "Resposta inválida do ponto (verificação de prioridade)")
+		return
+	}
+
+	// Se for o primeiro da fila, solicita encerramento da reserva
+	if respostaVerificacao.Action == "PRIMEIRO_DA_FILA" {
+		// Nova conexão para encerrar reserva
+		connPontoEncerrar, err := net.Dial("tcp", enderecoPonto)
+		if err != nil {
+			sendErrorResponse(conn, "Erro ao conectar ao ponto para encerrar reserva")
+			return
+		}
+		defer connPontoEncerrar.Close()
+
+		msgEncerrar := Message{
+			Action: "ENCERRAR_RESERVA",
+			Content: map[string]interface{}{
+				"carroID": carroID,
+			},
+		}
+		sendResponse(connPontoEncerrar, msgEncerrar)
+	}
+
+	// Atualiza registro do carregamento
 	carregamentoMutex.Lock()
 	defer carregamentoMutex.Unlock()
 
-	// Verificar se o carregamento existe
 	if currentCarID, exists := carrosEmCarregamento[pontoID]; !exists || currentCarID != carroID {
 		sendErrorResponse(conn, "Carregamento não encontrado")
 		return
 	}
 
-	// Calcular valor
 	valor := calcularValorConta(tempo)
-
-	// Remover do registro
 	delete(carrosEmCarregamento, pontoID)
 
 	response := Message{
@@ -239,7 +347,6 @@ func handleFimCarregamento(conn net.Conn, request Message) {
 	}
 
 	fmt.Println(response)
-
 	sendResponse(conn, response)
 }
 
@@ -278,14 +385,17 @@ func obterInformacoesPonto(endereco string) PontoRecarga {
 	}
 
 	content := msgResp.Content
+	fila := convertInterfaceToStringSlice(content["fila"])
+	tamanhoFila := len(fila)
+	fmt.Println("Fila do ponto de recarga:", tamanhoFila)
 	return PontoRecarga{
-		ID:        content["ID"].(string),
-		Latitude:  content["latitude"].(float64),
-		Longitude: content["longitude"].(float64),
-		Fila:      convertInterfaceToStringSlice(content["fila"]),
+		ID:          content["ID"].(string),
+		Latitude:    content["latitude"].(float64),
+		Longitude:   content["longitude"].(float64),
+		Fila:        fila,
+		TamanhoFila: tamanhoFila,
 	}
 }
-
 func convertInterfaceToStringSlice(data interface{}) []string {
 	if data == nil {
 		return nil
